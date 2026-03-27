@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Scout Scanner</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+:root {
+  --green: #22c55e; --red: #ef4444; --amber: #f59e0b;
+  --blue: #3b82f6; --bg: #0f0f0f; --surface: #1a1a1a;
+  --border: #2a2a2a; --text: #f5f5f5; --muted: #888;
+}
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
+
+/* ── Setup screen ── */
+#setup-screen {
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  height: 100%; padding: 2rem; gap: 1.5rem; text-align: center;
+}
+#setup-screen h1 { font-size: 22px; font-weight: 600; }
+#setup-screen p  { font-size: 14px; color: var(--muted); line-height: 1.5; max-width: 320px; }
+.field-group { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 360px; text-align: left; }
+.field-group label { font-size: 12px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+.field-group input, .field-group textarea {
+  width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font-size: 14px; font-family: inherit; outline: none;
+}
+.field-group input:focus, .field-group textarea:focus { border-color: var(--blue); }
+.field-group textarea { height: 80px; resize: none; font-size: 12px; }
+.btn-start {
+  width: 100%; max-width: 360px; padding: 14px; border-radius: 12px; border: none;
+  background: var(--blue); color: #fff; font-size: 16px; font-weight: 600; cursor: pointer;
+  font-family: inherit;
+}
+.btn-start:active { opacity: 0.85; }
+
+/* ── Scanner screen ── */
+#scanner-screen { display: none; position: relative; height: 100%; }
+
+#video {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  transform: scaleX(1); /* rear camera, no mirror */
+}
+
+/* Viewfinder overlay */
+#overlay {
+  position: absolute; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column;
+}
+.overlay-top    { flex: 1; background: rgba(0,0,0,0.5); }
+.overlay-middle { display: flex; height: 240px; }
+.overlay-side   { flex: 1; background: rgba(0,0,0,0.5); }
+#finder {
+  width: 240px; height: 240px; position: relative; flex-shrink: 0;
+}
+.corner {
+  position: absolute; width: 24px; height: 24px;
+  border-color: #fff; border-style: solid;
+}
+.corner.tl { top: 0; left: 0; border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
+.corner.tr { top: 0; right: 0; border-width: 3px 3px 0 0; border-radius: 0 4px 0 0; }
+.corner.bl { bottom: 0; left: 0; border-width: 0 0 3px 3px; border-radius: 0 0 0 4px; }
+.corner.br { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+.scan-line {
+  position: absolute; left: 4px; right: 4px; height: 2px;
+  background: linear-gradient(90deg, transparent, #3b82f6, transparent);
+  animation: scan 1.8s ease-in-out infinite;
+}
+@keyframes scan { 0%,100% { top: 8px; } 50% { top: 224px; } }
+.overlay-bottom { flex: 1; background: rgba(0,0,0,0.5); }
+
+/* Status bar */
+#status-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.85); padding: 16px 20px 32px;
+  display: flex; flex-direction: column; gap: 10px;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  pointer-events: all;
+}
+#status-pill {
+  align-self: center; padding: 6px 16px; border-radius: 999px;
+  font-size: 13px; font-weight: 500; background: var(--surface);
+  color: var(--muted); border: 1px solid var(--border);
+  transition: background 0.2s, color 0.2s;
+}
+#status-pill.ok     { background: rgba(34,197,94,0.15); color: var(--green); border-color: rgba(34,197,94,0.3); }
+#status-pill.error  { background: rgba(239,68,68,0.15);  color: var(--red);   border-color: rgba(239,68,68,0.3); }
+#status-pill.sending{ background: rgba(59,130,246,0.15); color: var(--blue);  border-color: rgba(59,130,246,0.3); }
+
+#log-list { list-style: none; max-height: 110px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+#log-list li {
+  font-size: 11px; padding: 5px 10px; border-radius: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+}
+#log-list li .log-data { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+#log-list li .log-status { font-size: 10px; flex-shrink: 0; }
+#log-list li.log-ok    .log-status { color: var(--green); }
+#log-list li.log-error .log-status { color: var(--red); }
+#log-list li.log-dupe  .log-status { color: var(--amber); }
+
+.btn-row { display: flex; gap: 10px; }
+.btn-sm {
+  flex: 1; padding: 10px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font-size: 13px; font-weight: 500;
+  cursor: pointer; font-family: inherit;
+}
+.btn-sm:active { opacity: 0.75; }
+.btn-sm.danger { border-color: rgba(239,68,68,0.4); color: var(--red); }
+
+/* Flash feedback */
+#flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity 0.05s; }
+#flash.flash { opacity: 0.25; }
+</style>
+</head>
+<body>
+
+<!-- ══ Setup screen ══ -->
+<div id="setup-screen">
+  <h1>🔍 Scout Scanner</h1>
+  <p>Scans QR codes from iPads and sends data directly to your Google Sheet.</p>
+
+  <div class="field-group">
+    <label>Apps Script Web App URL</label>
+    <input type="url" id="script-url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" spellcheck="false"/>
+  </div>
+
+  <div class="field-group">
+    <label>Sheet Tab Name</label>
+    <input type="text" id="sheet-tab" value="Practice Match Data" autocomplete="off"/>
+  </div>
+
+  <div class="field-group">
+    <label>Column Headers (paste from your sheet, tab-separated)</label>
+    <textarea id="col-headers" placeholder="Team&#9;Match&#9;Score&#9;…"></textarea>
+  </div>
+
+  <div id="setup-err" style="font-size:13px;color:var(--red);display:none"></div>
+  <button class="btn-start" id="start-btn">Start scanning</button>
+
+  <p style="font-size:12px">Settings are saved on this device.</p>
+</div>
+
+<!-- ══ Scanner screen ══ -->
+<div id="scanner-screen">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas" style="display:none"></canvas>
+  <div id="flash"></div>
+
+  <div id="overlay">
+    <div class="overlay-top"></div>
+    <div class="overlay-middle">
+      <div class="overlay-side"></div>
+      <div id="finder">
+        <div class="corner tl"></div><div class="corner tr"></div>
+        <div class="corner bl"></div><div class="corner br"></div>
+        <div class="scan-line"></div>
+      </div>
+      <div class="overlay-side"></div>
+    </div>
+    <div class="overlay-bottom"></div>
+  </div>
+
+  <div id="status-bar">
+    <div id="status-pill">Scanning…</div>
+    <ul id="log-list"></ul>
+    <div class="btn-row">
+      <button class="btn-sm" id="settings-btn">⚙ Settings</button>
+      <button class="btn-sm danger" id="clear-btn">Clear log</button>
+      <button class="btn-sm" id="export-btn">Export CSV</button>
+    </div>
+  </div>
+</div>
+
+<!-- jsQR library -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script>
+// ── Persist settings ────────────────────────────────────────────
+var STORAGE_KEY = 'scout_scanner_v1';
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch(e) { return {}; }
+}
+function saveSettings(s) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e) {}
+}
+
+var settings = loadSettings();
+if(settings.url)     document.getElementById('script-url').value  = settings.url;
+if(settings.tab)     document.getElementById('sheet-tab').value   = settings.tab;
+if(settings.headers) document.getElementById('col-headers').value = settings.headers;
+
+// ── State ────────────────────────────────────────────────────────
+var scriptUrl   = '';
+var sheetTab    = '';
+var scanLog     = [];        // [{data, status, time}]
+var recentCodes = {};        // code -> timestamp, prevents double-scan
+var COOLDOWN_MS = 4000;      // ignore same QR for 4 seconds
+var scanning    = false;
+var videoStream = null;
+var scanInterval= null;
+
+// ── Setup → Scanner ─────────────────────────────────────────────
+document.getElementById('start-btn').addEventListener('click', function() {
+  var url  = document.getElementById('script-url').value.trim();
+  var tab  = document.getElementById('sheet-tab').value.trim();
+  var hdrs = document.getElementById('col-headers').value.trim();
+  var err  = document.getElementById('setup-err');
+
+  if(!url || !url.startsWith('https://script.google.com')) {
+    err.textContent = 'Please enter a valid Apps Script URL.';
+    err.style.display = 'block'; return;
+  }
+  if(!tab) { err.textContent = 'Enter a sheet tab name.'; err.style.display = 'block'; return; }
+  err.style.display = 'none';
+
+  scriptUrl = url; sheetTab = tab;
+  saveSettings({ url: url, tab: tab, headers: hdrs });
+
+  document.getElementById('setup-screen').style.display = 'none';
+  document.getElementById('scanner-screen').style.display = 'block';
+  startCamera();
+});
+
+document.getElementById('settings-btn').addEventListener('click', function() {
+  stopCamera();
+  document.getElementById('scanner-screen').style.display = 'none';
+  document.getElementById('setup-screen').style.display = 'flex';
+});
+
+document.getElementById('clear-btn').addEventListener('click', function() {
+  scanLog = [];
+  recentCodes = {};
+  document.getElementById('log-list').innerHTML = '';
+  setStatus('Log cleared', '');
+});
+
+document.getElementById('export-btn').addEventListener('click', exportCSV);
+
+// ── Camera ───────────────────────────────────────────────────────
+function startCamera() {
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false
+  }).then(function(stream) {
+    videoStream = stream;
+    var video = document.getElementById('video');
+    video.srcObject = stream;
+    video.addEventListener('loadedmetadata', function() {
+      video.play();
+      scanning = true;
+      scanInterval = setInterval(scanFrame, 200); // scan 5× per second
+      setStatus('Scanning…', '');
+    });
+  }).catch(function(err) {
+    setStatus('Camera error: ' + err.message, 'error');
+  });
+}
+
+function stopCamera() {
+  scanning = false;
+  if(scanInterval) { clearInterval(scanInterval); scanInterval = null; }
+  if(videoStream) { videoStream.getTracks().forEach(function(t){ t.stop(); }); videoStream = null; }
+}
+
+// ── QR decode loop ────────────────────────────────────────────────
+function scanFrame() {
+  if(!scanning) return;
+  var video = document.getElementById('video');
+  if(video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
+  var canvas = document.getElementById('canvas');
+  var ctx = canvas.getContext('2d');
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  var code = jsQR(imageData.data, imageData.width, imageData.height, {
+    inversionAttempts: 'dontInvert'
+  });
+
+  if(code && code.data) {
+    var now = Date.now();
+    var last = recentCodes[code.data];
+    if(last && (now - last) < COOLDOWN_MS) return; // cooldown
+    recentCodes[code.data] = now;
+    handleScan(code.data);
+  }
+}
+
+// ── Handle a decoded QR ───────────────────────────────────────────
+function handleScan(raw) {
+  flashScreen();
+  vibrate();
+  setStatus('Sending…', 'sending');
+  sendToSheet(raw);
+}
+
+function sendToSheet(raw) {
+  // POST tab-separated data to Apps Script
+  // We send raw as-is (already tab-separated from the QR code)
+  // Also include the target tab name as a query param so script can override if needed
+  var url = scriptUrl;
+
+  fetch(url, {
+    method: 'POST',
+    body: raw,
+    headers: { 'Content-Type': 'text/plain' }
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if(data.ok) {
+      addLog(raw, 'ok', 'Row ' + data.row);
+      setStatus('✓ Saved to row ' + data.row, 'ok');
+    } else {
+      addLog(raw, 'error', data.error || 'Error');
+      setStatus('✗ ' + (data.error || 'Error'), 'error');
+    }
+  })
+  .catch(function(err) {
+    // Network error — save locally for retry
+    addLog(raw, 'error', 'Network error');
+    setStatus('✗ Network error — check connection', 'error');
+  });
+}
+
+// ── Log ───────────────────────────────────────────────────────────
+function addLog(raw, status, detail) {
+  var entry = { data: raw, status: status, detail: detail, time: new Date().toLocaleTimeString() };
+  scanLog.unshift(entry);
+
+  var list = document.getElementById('log-list');
+  var li = document.createElement('li');
+  li.className = 'log-' + status;
+
+  // Show first few fields of data as preview
+  var preview = raw.split('\t').slice(0,4).join(' | ');
+  li.innerHTML = '<span class="log-data">' + escH(preview) + '</span>'
+    + '<span class="log-status">' + escH(detail) + ' ' + entry.time + '</span>';
+  list.insertBefore(li, list.firstChild);
+
+  // Keep log to 20 visible entries
+  while(list.children.length > 20) list.removeChild(list.lastChild);
+}
+
+// ── UI helpers ────────────────────────────────────────────────────
+function setStatus(msg, cls) {
+  var pill = document.getElementById('status-pill');
+  pill.textContent = msg;
+  pill.className = cls ? 'ok error sending dupe'.split(' ').reduce(function(a,c){ return a.replace(c,''); }, pill.className).trim() : '';
+  if(cls) pill.classList.add(cls);
+  // Reset to scanning after 3s unless it's a permanent state
+  if(cls === 'ok' || cls === 'error') {
+    setTimeout(function(){ setStatus('Scanning…',''); }, 3000);
+  }
+}
+
+function flashScreen() {
+  var f = document.getElementById('flash');
+  f.classList.add('flash');
+  setTimeout(function(){ f.classList.remove('flash'); }, 100);
+}
+
+function vibrate() {
+  if(navigator.vibrate) navigator.vibrate(40);
+}
+
+function escH(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Export ─────────────────────────────────────────────────────────
+function exportCSV() {
+  if(scanLog.length === 0) { setStatus('Nothing to export', 'error'); return; }
+  // Build CSV: replace tabs with commas
+  var rows = scanLog.slice().reverse().map(function(e) {
+    return e.data.split('\t').map(function(v) {
+      return '"' + v.replace(/"/g,'""') + '"';
+    }).join(',');
+  });
+  var csv = rows.join('\n');
+  var blob = new Blob([csv], { type: 'text/csv' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href   = url;
+  a.download = 'scouting_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
